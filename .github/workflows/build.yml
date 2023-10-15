@@ -8,7 +8,7 @@ on:
 
 env:
   IMAGE_STAGING: "ghcr.io/${{ github.repository_owner }}/postgis-testing"
-  IMAGE_RELEASE: "ghcr.io/${{ github.repository_owner }}/postgis"
+  IMAGE_RELEASE: "ghcr.io/${{ github.repository_owner }}/cnpg-postgis"
 
 jobs:
   generate-jobs:
