@@ -51,7 +51,7 @@ jobs:
         do
           RESULT="${RESULT},${IMAGE_STAGING}:${tag}"
           # If we are running the pipeline in the main branch images are pushed in both -testing and PROD repo
-          if [ "${GITHUB_REF#refs/heads/}" == main ]
+          if [ "${GITHUB_REF#refs/heads/}" == zs ]
           then
             RESULT="${RESULT},${IMAGE_RELEASE}:${tag}"
           fi
