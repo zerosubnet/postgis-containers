@@ -3,7 +3,7 @@ name: Continuous Delivery
 on:
   push:
     branches:
-      - main
+      - zs
   workflow_dispatch:
 
 env:
