@@ -17,6 +17,21 @@
 
 set -Eeuo pipefail
 
+error_trap() {
+  local exit_code=$?
+  local line_number=$LINENO
+  local script_name=$(basename "$0")
+  local func_name=${FUNCNAME[1]:-MAIN}
+
+  echo "❌ ERROR in $script_name at line $line_number"
+  echo "   Function: $func_name"
+  echo "   Command: '$BASH_COMMAND'"
+  echo "   Exit code: $exit_code"
+  exit $exit_code
+}
+
+trap error_trap ERR
+
 cd "$(dirname "$(readlink -f "$BASH_SOURCE")")"
 
 versions=("$@")
@@ -28,22 +43,31 @@ if [ ${#versions[@]} -eq 0 ]; then
 fi
 versions=("${versions[@]%/}")
 
+# Update this everytime a new major release of PostgreSQL is available
+POSTGRESQL_LATEST_MAJOR_RELEASE=17
+
 # Get the last postgres base image tag and update time
 fetch_postgres_image_version() {
-    local suite="$1";
-    local item="$2";
-	curl -SsL "https://registry.hub.docker.com/v2/repositories/postgis/postgis/tags/?name=${suite}&ordering=last_updated&" | \
-	  jq -c ".results[] | select( .name | match(\"^${suite}-[0-9.]+$\"))" | \
-	  jq -r ".${item}" | \
-	  sort -r | \
-	  head -n1
-}
+	local version="$1";
+	local item="$2";
 
+	regexp="^${version}-[0-9.]+$"
+	if [[ ${version} -gt "${POSTGRESQL_LATEST_MAJOR_RELEASE}" ]]; then
+		regexp="^${version}beta[0-9]+-master$"
+	fi
+
+	curl -SsL "https://registry.hub.docker.com/v2/repositories/postgis/postgis/tags/?name=${version}&ordering=last_updated&" | \
+		jq --arg regexp "$regexp" -c '.results[] | select( .name | match($regexp))' | \
+		jq -r ".${item}" | \
+		sort -r | \
+		head -n1
+}
 
 # Get the latest Barman version
 latest_barman_version=
 _raw_get_latest_barman_version() {
-	curl -s https://pypi.org/pypi/barman/json | jq -r '.releases | keys[]' | sort -Vr | head -n1
+#	curl -s https://pypi.org/pypi/barman/json | jq -r '.releases | keys[]' | sort -Vr | head -n1
+	echo "3.12.1"
 }
 get_latest_barman_version() {
 	if [ -z "$latest_barman_version" ]; then
@@ -79,18 +103,29 @@ generate_postgres() {
 		echo "Unable to retrieve latest postgres ${version} image version"
 		exit 1
 	fi
+
 	postgisImageLastUpdate=$(fetch_postgres_image_version "${version}" "last_updated")
 	if [ -z "$postgisImageLastUpdate" ]; then
 		echo "Unable to retrieve latest  postgis ${version} image version last update time"
 		exit 1
 	fi
 
-
 	barmanVersion=$(get_latest_barman_version)
 	if [ -z "$barmanVersion" ]; then
 		echo "Unable to retrieve latest barman-cli-cloud version"
 		exit 1
 	fi
+
+	dockerTemplate="Dockerfile.template"
+	if [[ ${version} -gt "${POSTGRESQL_LATEST_MAJOR_RELEASE}" ]]; then
+		dockerTemplate="Dockerfile-beta.template"
+	fi
+
+	# Update requirements.txt
+	cp -r src/* "$version/"
+
+	# Output the image being updated
+	echo "$postgisImageVersion"
 
 	if [ -f "${versionFile}" ]; then
 		oldImageReleaseVersion=$(jq -r '.IMAGE_RELEASE_VERSION' "${versionFile}")
@@ -110,9 +145,9 @@ generate_postgres() {
 
 	newRelease="false"
 
-	# Detect if postgres image updated
+	# Detect an update of the postgis image
 	if [ "$oldPostgisImageLastUpdate" != "$postgisImageLastUpdate" ]; then
-		echo "Debian Image changed from $oldPostgisImageLastUpdate to $postgisImageLastUpdate"
+		echo "Postgis image timestamp changed from $oldPostgisImageLastUpdate to $postgisImageLastUpdate"
 		newRelease="true"
 		record_version "${versionFile}" "POSTGIS_IMAGE_LAST_UPDATED" "${postgisImageLastUpdate}"
 	fi
@@ -124,9 +159,21 @@ generate_postgres() {
 		record_version "${versionFile}" "BARMAN_VERSION" "${barmanVersion}"
 	fi
 
-    if [ "$oldPostgisImageVersion" != "$postgisImageVersion" ]; then
-	    echo "PostGIS base image changed from $oldPostgisImageVersion to $postgisImageVersion"
-	    record_version "${versionFile}" "IMAGE_RELEASE_VERSION" 1
+	# Detect an update of Dockerfile template
+	if [[ -n $(git diff --name-status "$dockerTemplate") ]]; then
+		echo "Detected update of $dockerTemplate"
+		newRelease="true"
+	fi
+
+	# Detect an update of requirements.txt
+	if [[ -n $(git diff --name-status "$version/requirements.txt") ]]; then
+		echo "Detected update of requirements.txt dependencies"
+		newRelease="true"
+	fi
+
+	if [ "$oldPostgisImageVersion" != "$postgisImageVersion" ]; then
+		echo "PostGIS base image changed from $oldPostgisImageVersion to $postgisImageVersion"
+		record_version "${versionFile}" "IMAGE_RELEASE_VERSION" 1
 		record_version "${versionFile}" "POSTGIS_IMAGE_VERSION" "${postgisImageVersion}"
 		imageReleaseVersion=1
 	elif [ "$newRelease" = "true" ]; then
@@ -134,17 +181,17 @@ generate_postgres() {
 		record_version "${versionFile}" "IMAGE_RELEASE_VERSION" $imageReleaseVersion
 	fi
 
-	cp -r src/* "$version/"
 	sed -e 's/%%POSTGIS_IMAGE_VERSION%%/'"$postgisImageVersion"'/g' \
 		-e 's/%%IMAGE_RELEASE_VERSION%%/'"$imageReleaseVersion"'/g' \
-		Dockerfile.template \
+		"${dockerTemplate}" \
 		> "$version/Dockerfile"
 }
 
 update_requirements() {
 	barmanVersion=$(get_latest_barman_version)
 	# If there's a new version we need to recreate the requirements files
-	echo "barman[cloud,azure,snappy,google] == $barmanVersion" > requirements.in
+	echo "barman[cloud,azure,snappy,google,zstandard,lz4] == $barmanVersion" > requirements.in
+	echo "boto3 == 1.35.99" >> requirements.in
 
 	# This will take the requirements.in file and generate a file
 	# requirements.txt with the hashes for the required packages
