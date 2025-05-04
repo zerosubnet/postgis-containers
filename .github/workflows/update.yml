@@ -45,7 +45,7 @@ jobs:
         uses: benjefferies/branch-protection-bot@v1.1.2
         with:
           access_token: ${{ secrets.REPO_GHA_PAT }}
-          branch: main
+          branch: zs
           enforce_admins: false
       - uses: EndBug/add-and-commit@v9
         with:
@@ -57,5 +57,5 @@ jobs:
         if: ${{ always() && github.ref == 'refs/heads/main' }}
         with:
           access_token: ${{ secrets.REPO_GHA_PAT }}
-          branch: main
+          branch: zs
           enforce_admins: ${{ steps.disable_include_admins.outputs.initial_status }}

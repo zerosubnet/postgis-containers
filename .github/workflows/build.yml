@@ -3,14 +3,15 @@ name: Continuous Delivery
 on:
   push:
     branches:
-      - main
+      - zs
     paths-ignore:
       - PostGIS/ClusterImageCatalog.yaml
+      
   workflow_dispatch:
 
 env:
   IMAGE_STAGING: "ghcr.io/${{ github.repository_owner }}/postgis-testing"
-  IMAGE_RELEASE: "ghcr.io/${{ github.repository_owner }}/postgis"
+  IMAGE_RELEASE: "ghcr.io/${{ github.repository_owner }}/cnpg-postgis"
 
 jobs:
   generate-jobs:
@@ -54,7 +55,7 @@ jobs:
         do
           RESULT="${RESULT},${IMAGE_STAGING}:${tag}"
           # If we are running the pipeline in the main branch images are pushed in both -testing and PROD repo
-          if [ "${GITHUB_REF#refs/heads/}" == main ]
+          if [ "${GITHUB_REF#refs/heads/}" == zs ]
           then
             RESULT="${RESULT},${IMAGE_RELEASE}:${tag}"
           fi
@@ -99,6 +100,8 @@ jobs:
         file: ${{ matrix.file }}
         push: false
         load: true
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
         tags: ${{ env.TAGS }}
 
     - name: Dockle scan
